@@ -122,6 +122,8 @@ struct CarEvent @0x9b1657f34caf3ad3 {
     leadMovingAlertSilent @119;
     leadMovingAlert @120;
     manualSteeringRequiredBlinkersOn @121;
+    atlEngageSound @122;
+    atlDisengageSound @123;
 
     radarCanErrorDEPRECATED @15;
     communityFeatureDisallowedDEPRECATED @62;
@@ -393,6 +395,7 @@ struct CarControl {
     leftLaneVisible @7: Bool;
     rightLaneDepart @8: Bool;
     leftLaneDepart @9: Bool;
+    leadVelocity @10: Float32;
 
     enum VisualAlert {
       # these are the choices from the Honda

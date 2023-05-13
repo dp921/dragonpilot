@@ -737,7 +737,8 @@ class Controls:
                                                                                        lat_plan.curvatureRates, self.dp_lat_version)
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,
                                                                              self.last_actuators, self.steer_limited, self.desired_curvature,
-                                                                             self.desired_curvature_rate, self.sm['liveLocationKalman'])
+                                                                             self.desired_curvature_rate, self.sm['liveLocationKalman'],
+                                                                             lat_plan.curvatures)
       actuators.curvature = self.desired_curvature
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()
@@ -822,6 +823,7 @@ class Controls:
     hudControl.speedVisible = self.enabled
     hudControl.lanesVisible = self.enabled
     hudControl.leadVisible = self.sm['longitudinalPlan'].hasLead
+    hudControl.leadVelocity = self.sm['radarState'].leadOne.vLeadK if self.sm['longitudinalPlan'].hasLead else 0.0
 
     hudControl.rightLaneVisible = True
     hudControl.leftLaneVisible = True

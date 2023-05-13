@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from cereal import car
+from common.numpy_fast import interp
 from common.conversions import Conversions as CV
 from panda import Panda
 from selfdrive.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
@@ -9,12 +10,20 @@ from selfdrive.car.interfaces import CarInterfaceBase
 from common.params import Params
 
 EventName = car.CarEvent.EventName
-
+GearShifter = car.CarState.GearShifter
 
 class CarInterface(CarInterfaceBase):
+  prev_atl = False
+
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
-    return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
+    if CP.carFingerprint in TSS2_CAR:
+      # Allow for higher accel from PID controller at low speeds
+      return CarControllerParams.ACCEL_MIN, interp(current_speed,
+                                                   CarControllerParams.ACCEL_MAX_TSS2_BP,
+                                                   CarControllerParams.ACCEL_MAX_TSS2_VALS)
+    else:
+      return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
 
   @staticmethod
   def _get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs):
@@ -59,9 +68,10 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.PRIUS_V:
       stop_and_go = True
       ret.wheelbase = 2.78
-      ret.steerRatio = 17.4
+      ret.steerRatio = 18.1
       tire_stiffness_factor = 0.5533
       ret.mass = 3340. * CV.LB_TO_KG + STD_CARGO_KG
+      ret.wheelSpeedFactor = 1.09
 
     elif candidate in (CAR.RAV4, CAR.RAV4H):
       stop_and_go = True if (candidate in CAR.RAV4H) else False
@@ -246,28 +256,22 @@ class CarInterface(CarInterfaceBase):
     tune = ret.longitudinalTuning
     tune.deadzoneBP = [0., 9.]
     tune.deadzoneV = [.0, .15]
-    if candidate in TSS2_CAR or ret.enableGasInterceptor:
-      tune.kpBP = [0., 5., 20.]
-      tune.kpV = [1.3, 1.0, 0.7]
-      tune.kiBP = [0.,  3.,  12.,  20.,  23.,  40.]
-      #kiBP in mph [0,  6.7, 22,   45,   51,   89]
-      tune.kiV = [.209,  .219, .209, .168, .085, .0027]
-      if candidate in TSS2_CAR:
-        ret.vEgoStopping = 0.1         # car is near 0.1 to 0.2 when car starts requesting stopping accel
-        ret.vEgoStarting = 0.1         # needs to be > or == vEgoStopping
-        ret.stopAccel = -0.4           # Toyota requests -0.4 when stopped
-        ret.stoppingDecelRate = 0.03   # reach stopping target smoothly
-        #ret.longitudinalActuatorDelayLowerBound = 0.2
-        #ret.longitudinalActuatorDelayUpperBound = 0.2
-        ### stock ###
-        #ret.vEgoStopping = 0.25
-        #ret.vEgoStarting = 0.25
-        #ret.stoppingDecelRate = 0.3  # reach stopping target smoothly
-    else:
-      tune.kpBP = [0., 5., 35.]
-      tune.kiBP = [0., 35.]
-      tune.kpV = [3.6, 2.4, 1.5]
-      tune.kiV = [0.54, 0.36]
+    tune.kpBP = [0., 5., 20.]
+    tune.kpV = [1.3, 1.0, 0.7]
+    tune.kiBP = [0.,  3.,  12.,  20.,  23.,  40.]
+    #kiBP in mph [0,  6.7, 22,   45,   51,   89]
+    tune.kiV = [.209,  .219, .209, .168, .085, .0027]
+    if candidate in TSS2_CAR:
+      ret.vEgoStopping = 0.1         # car is near 0.1 to 0.2 when car starts requesting stopping accel
+      ret.vEgoStarting = 0.1         # needs to be > or == vEgoStopping
+      ret.stopAccel = -0.4           # Toyota requests -0.4 when stopped
+      ret.stoppingDecelRate = 0.03   # reach stopping target smoothly
+      #ret.longitudinalActuatorDelayLowerBound = 0.2
+      #ret.longitudinalActuatorDelayUpperBound = 0.2
+      ### stock ###
+      #ret.vEgoStopping = 0.25
+      #ret.vEgoStarting = 0.25
+      #ret.stoppingDecelRate = 0.3  # reach stopping target smoothly
 
     return ret
 
@@ -276,7 +280,7 @@ class CarInterface(CarInterfaceBase):
     ret = self.CS.update(self.cp, self.cp_cam)
 
     # events
-    events = self.create_common_events(ret)
+    events = self.create_common_events(ret, extra_gears=[GearShifter.sport])
 
     if self.CP.openpilotLongitudinalControl:
       if ret.cruiseState.standstill and not ret.brakePressed and not self.CP.enableGasInterceptor:
@@ -291,6 +295,13 @@ class CarInterface(CarInterfaceBase):
         if ret.vEgo < 0.001:
           # while in standstill, send a user alert
           events.add(EventName.manualRestart)
+
+    if int(Params().get("dp_atl").decode('utf-8')) > 0:
+      if not self.prev_atl and ret.cruiseState.available:
+        events.add(EventName.atlEngageSound)
+      elif self.prev_atl and not (ret.cruiseState.available and self.CP.openpilotLongitudinalControl):
+        events.add(EventName.atlDisengageSound)
+      self.prev_atl = ret.cruiseState.available
 
     ret.events = events.to_msg()
 
