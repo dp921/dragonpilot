@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from cereal import car
+from common.numpy_fast import interp
 from common.conversions import Conversions as CV
 from common.params import Params, put_nonblocking
 from panda import Panda
@@ -17,9 +18,21 @@ GAC_DICT = {3: 1, 2: 2, 1: 3}
 
 
 class CarInterface(CarInterfaceBase):
+  def __init__(self, CP, CarController, CarState):
+    super().__init__(CP, CarController, CarState)
+
+    # init for low speed re-write (dp)
+    self.low_cruise_speed = 0.
+
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
-    return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
+    if CP.carFingerprint in TSS2_CAR:
+      # Allow for higher accel from PID controller at low speeds
+      return CarControllerParams.ACCEL_MIN, interp(current_speed,
+                                                   CarControllerParams.ACCEL_MAX_TSS2_BP,
+                                                   CarControllerParams.ACCEL_MAX_TSS2_VALS)
+    else:
+      return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
 
   @staticmethod
   def _get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs):
@@ -64,9 +77,10 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.PRIUS_V:
       stop_and_go = True
       ret.wheelbase = 2.78
-      ret.steerRatio = 17.4
+      ret.steerRatio = 16.8
       tire_stiffness_factor = 0.5533
       ret.mass = 3340. * CV.LB_TO_KG + STD_CARGO_KG
+      ret.wheelSpeedFactor = 1.09
 
     elif candidate in (CAR.RAV4, CAR.RAV4H):
       stop_and_go = True if (candidate in CAR.RAV4H) else False
@@ -357,6 +371,19 @@ class CarInterface(CarInterfaceBase):
         self.mads_event_lock = True
 
     ret.buttonEvents = buttonEvents
+
+    # low speed re-write (dp)
+    self.cruise_speed_override = True # change this to False if you want to disable cruise speed override
+    if ret.cruiseState.enabled and ret.cruiseState.speed < 45 * CV.KPH_TO_MS and self.CP.openpilotLongitudinalControl:
+      if self.cruise_speed_override:
+        if self.low_cruise_speed == 0.:
+          ret.cruiseState.speed = ret.cruiseState.speedCluster = self.low_cruise_speed = max(24 * CV.KPH_TO_MS, ret.vEgo)
+        else:
+          ret.cruiseState.speed = ret.cruiseState.speedCluster = self.low_cruise_speed
+      else:
+        ret.cruiseState.speed = ret.cruiseState.speedCluster = 24 * CV.KPH_TO_MS
+    else:
+      self.low_cruise_speed = 0.
 
     # events
     events = self.create_common_events(ret, c, extra_gears=[GearShifter.sport, GearShifter.low, GearShifter.brake],
