@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from cereal import car
+from common.numpy_fast import interp
 from common.conversions import Conversions as CV
 from panda import Panda
 from selfdrive.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
@@ -59,9 +60,10 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.PRIUS_V:
       stop_and_go = True
       ret.wheelbase = 2.78
-      ret.steerRatio = 17.4
+      ret.steerRatio = 16.8
       tire_stiffness_factor = 0.5533
       ret.mass = 3340. * CV.LB_TO_KG + STD_CARGO_KG
+      ret.wheelSpeedFactor = 1.09
 
     elif candidate in (CAR.RAV4, CAR.RAV4H):
       stop_and_go = True if (candidate in CAR.RAV4H) else False
@@ -253,20 +255,15 @@ class CarInterface(CarInterfaceBase):
     tune = ret.longitudinalTuning
     tune.deadzoneBP = [0., 9.]
     tune.deadzoneV = [.0, .15]
-    if candidate in TSS2_CAR or ret.enableGasInterceptor:
-      tune.kpBP = [0., 5., 20.]
-      tune.kpV = [1.3, 1.0, 0.7]
-      tune.kiBP = [0., 5., 12., 20., 27.]
-      tune.kiV = [.35, .23, .20, .17, .1]
-      if candidate in TSS2_CAR:
-        ret.vEgoStopping = 0.25
-        ret.vEgoStarting = 0.25
-        ret.stoppingDecelRate = 0.3  # reach stopping target smoothly
-    else:
-      tune.kpBP = [0., 5., 35.]
-      tune.kiBP = [0., 35.]
-      tune.kpV = [3.6, 2.4, 1.5]
-      tune.kiV = [0.54, 0.36]
+    tune.kpBP = [0., 5., 20.]
+    tune.kpV = [1.3, 1.0, 0.7]
+    tune.kiBP = [0.,   1.,    2.,    3.,   4.,   5.,    12.,  20.,  27., 40.]
+    tune.kiV = [.348, .3361, .3168, .2831, .2571, .226, .198, .17,  .10, .01]
+    if candidate in TSS2_CAR:
+      ret.vEgoStopping = 0.1         # car is near 0.1 to 0.2 when car starts requesting stopping accel
+      ret.vEgoStarting = 0.1         # needs to be > or == vEgoStopping
+      ret.stopAccel = -0.4           # Toyota requests -0.4 when stopped
+      ret.stoppingDecelRate = 0.03   # reach stopping target smoothly
 
     return ret
 
